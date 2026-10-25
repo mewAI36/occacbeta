@@ -1,22 +1,5 @@
 repeat task.wait() until game:IsLoaded()
 local env = getfenv()
-if getgenv().Configs == nil then getgenv().Configs = {} end
-if type(getgenv().Configs["FPS Boost"]) ~= "table" then
-	getgenv().Configs["FPS Boost"] = {
-		["Enable"] = true,
-		["Budget Ratio"] = 0.2,
-		["Burst Budget MS"] = 50,
-		["Burst Time"] = 3.5,
-		["Initial Budget MS"] = 100,
-		["Initial Time"] = 4,
-		["Debug"] = false,
-	}
-end
-local fpsBootCfg = getgenv().Configs["FPS Boost"]
-if fpsBootCfg["Enable"] == false then
-	print("[FPSBoost] Enable = false -> khong chay")
-	return
-end
 getgenv()._FPSBoostHooked = nil
 getgenv()._FPSLightingHooked = nil
 getgenv()._FPSBoostGCLoop = nil
@@ -106,7 +89,7 @@ getgenv()._FPSBoostGCLoop = nil
     end)
   end
   repairPortals()
-  local fpsCfg = (getgenv().Configs and getgenv().Configs["FPS Boost"]) or {}
+  local fpsCfg = { ["Box Collision"] = false, ["Budget Ratio"] = 0.2, ["Burst Budget MS"] = 50, ["Burst Time"] = 3.5, ["Initial Budget MS"] = 100, ["Initial Time"] = 4, ["Debug"] = false }
   local RunService = game:GetService("RunService")
   local SMOOTH = Enum.Material.SmoothPlastic
   local BOX = Enum.CollisionFidelity.Box
