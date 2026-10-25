@@ -1,1 +1,308 @@
-print("?")
+repeat task.wait() until game:IsLoaded()
+local env = getfenv()
+if getgenv().Configs == nil then getgenv().Configs = {} end
+if type(getgenv().Configs["FPS Boost"]) ~= "table" then
+	getgenv().Configs["FPS Boost"] = {
+		["Enable"] = true,
+		["Budget Ratio"] = 0.2,
+		["Burst Budget MS"] = 50,
+		["Burst Time"] = 3.5,
+		["Initial Budget MS"] = 100,
+		["Initial Time"] = 4,
+		["Debug"] = false,
+	}
+end
+local fpsBootCfg = getgenv().Configs["FPS Boost"]
+if fpsBootCfg["Enable"] == false then
+	print("[FPSBoost] Enable = false -> khong chay")
+	return
+end
+getgenv()._FPSBoostHooked = nil
+getgenv()._FPSLightingHooked = nil
+getgenv()._FPSBoostGCLoop = nil
+  local GRAY_COLOR = Color3.fromRGB(135, 135, 135)
+  pcall(function()
+    local setff = setfflag or (env and env.setfflag)
+    if setff then
+      setff("DFFlagTextureQualityOverride", "1")
+      setff("FIntRenderShadowMapRes", "0")
+      setff("FFlagRenderShadowIntensity", "0")
+      setff("FIntRenderMultisampleSamples", "1")
+      setff("FFlagRenderTerrainDecoration", "False")
+      setff("FIntRenderResolutionScale", "50")
+      setff("FFlagDebugDisableStreamingSkybox", "True")
+      setff("FFlagAnimBlockMainThread", "False")
+    end
+  end)
+  pcall(function()
+    local set = settings and settings() or (env and env.settings and env.settings())
+    if set and set.Rendering then
+      set.Rendering.QualityLevel = 1
+    end
+  end)
+  pcall(function()
+    local terrain = workspace:FindFirstChildOfClass("Terrain")
+    if terrain then
+      terrain.WaterWaveSize = 0
+      terrain.WaterWaveSpeed = 0
+      terrain.WaterReflectance = 0
+      terrain.WaterTransparency = 1
+      terrain.Decoration = false
+    end
+  end)
+  pcall(function()
+    local lighting = game:GetService("Lighting")
+    lighting.GlobalShadows = false
+    lighting.FogEnd = 9e9
+    lighting.FogStart = 9e9
+    lighting.ShadowSoftness = 0
+    lighting.EnvironmentDiffuseScale = 0
+    lighting.EnvironmentSpecularScale = 0
+    local function optimizeLightingChild(child)
+      pcall(function()
+        if child:IsA("PostEffect") or child:IsA("BloomEffect") or child:IsA("BlurEffect") or child:IsA("ColorCorrectionEffect") or child:IsA("SunRaysEffect") or child:IsA("DepthOfFieldEffect") then
+          child.Enabled = false
+        elseif child:IsA("Atmosphere") or child:IsA("Clouds") then
+          child:Destroy()
+        elseif child:IsA("Sky") then
+          child.CelestialBodiesShown = true
+          child.StarCount = 0
+        end
+      end)
+    end
+    for _, child in ipairs(lighting:GetChildren()) do
+      optimizeLightingChild(child)
+    end
+    if not getgenv()._FPSLightingHooked then
+      getgenv()._FPSLightingHooked = true
+      lighting.ChildAdded:Connect(optimizeLightingChild)
+    end
+  end)
+  local function ensurePortalParticles(attachment)
+    if not attachment or not attachment:IsA("Attachment") then return end
+    if attachment.Name == "Light" or (attachment.Parent and attachment.Parent.Name:find("Portal")) then
+      for i = 1, 12 do
+        local pName = "Particle_" .. i
+        if not attachment:FindFirstChild(pName) then
+          local pe = Instance.new("ParticleEmitter")
+          pe.Name = pName
+          pe.Rate = 0
+          pe.Enabled = false
+          pe.Transparency = NumberSequence.new(1)
+          pe.Parent = attachment
+        end
+      end
+    end
+  end
+  local function repairPortals()
+    pcall(function()
+      local wo = workspace:FindFirstChild("_WorldOrigin")
+      if not wo then return end
+      for _, desc in ipairs(wo:GetDescendants()) do
+        if desc:IsA("Attachment") and (desc.Name == "Light" or (desc.Parent and desc.Parent.Name:find("Portal"))) then
+          ensurePortalParticles(desc)
+        end
+      end
+    end)
+  end
+  repairPortals()
+  local fpsCfg = (getgenv().Configs and getgenv().Configs["FPS Boost"]) or {}
+  local RunService = game:GetService("RunService")
+  local SMOOTH = Enum.Material.SmoothPlastic
+  local BOX = Enum.CollisionFidelity.Box
+  local EMPTY_SEQ = NumberSequence.new(1)
+  local boxCollision = fpsCfg["Box Collision"] == true
+  local budgetRatio = tonumber(fpsCfg["Budget Ratio"]) or 0.2
+  local burstBudget = (tonumber(fpsCfg["Burst Budget MS"]) or 50) / 1000
+  local burstTime = tonumber(fpsCfg["Burst Time"]) or 3.5
+  local burstEnd = 0
+  local initBudget = (tonumber(fpsCfg["Initial Budget MS"]) or 100) / 1000
+  local initTime = tonumber(fpsCfg["Initial Time"]) or 4
+  local debugLog = fpsCfg["Debug"] ~= false
+  local initEnd, initStart, initialDone = 0, 0, false
+  local doneCount, scanCount, wakeCount, wakeStart = 0, 0, 0, 0
+  local function hAttachment(v)
+    if v.Name == "Light" or (v.Parent and v.Parent.Name:find("Portal")) then
+      ensurePortalParticles(v)
+    end
+  end
+  local function hParticle(v)
+    v.Enabled = false
+    v.Rate = 0
+    v.Transparency = EMPTY_SEQ
+  end
+  local function hTrail(v)
+    v.Enabled = false
+    v.Transparency = EMPTY_SEQ
+  end
+  local function hLight(v)
+    v.Enabled = false
+    v.Shadows = false
+  end
+  local function hEnable(v)
+    if v.Enabled then v.Enabled = false end
+  end
+  local function hExplosion(v)
+    v.BlastPressure = 0
+    v.BlastRadius = 0
+    pcall(function() v.Visible = false end)
+  end
+  local function hDecal(v)
+    v.Transparency = 1
+    if v.Texture ~= "" then v.Texture = "" end
+  end
+  local function hSound(v)
+    if not v.Looped then return end
+    if v:FindFirstAncestorOfClass("Tool") or v:FindFirstAncestorOfClass("Player") then return end
+    local wo = workspace:FindFirstChild("_WorldOrigin")
+    if wo and v:IsDescendantOf(wo) then return end
+    v.Volume = 0
+  end
+  local function hPart(v)
+    if v.Material ~= SMOOTH then v.Material = SMOOTH end
+    if v.Reflectance ~= 0 then v.Reflectance = 0 end
+    if v.CastShadow then v.CastShadow = false end
+    if v.Color ~= GRAY_COLOR then v.Color = GRAY_COLOR end
+  end
+  local function hMeshPart(v)
+    hPart(v)
+    if v.TextureID ~= "" then v.TextureID = "" end
+    if boxCollision and v.CollisionFidelity ~= BOX then v.CollisionFidelity = BOX end
+    v.UsePartColor = true
+  end
+  local function hSpecialMesh(v)
+    if v.TextureId ~= "" then v.TextureId = "" end
+  end
+  local function hGradient(v)
+    v.Enabled = false
+  end
+  local handlerCache = {}
+  local function resolve(v)
+    if v:IsA("Attachment") then return hAttachment
+    elseif v:IsA("ParticleEmitter") then return hParticle
+    elseif v:IsA("Trail") or v:IsA("Beam") then return hTrail
+    elseif v:IsA("Light") then return hLight
+    elseif v:IsA("Fire") or v:IsA("Smoke") or v:IsA("Sparkles") or v:IsA("Highlight") or v:IsA("PostEffect") then return hEnable
+    elseif v:IsA("Explosion") then return hExplosion
+    elseif v:IsA("Decal") or v:IsA("Texture") then return hDecal
+    elseif v:IsA("Sound") then return hSound
+    elseif v:IsA("UIGradient") then return hGradient
+    elseif v:IsA("MeshPart") then return hMeshPart
+    elseif v:IsA("BasePart") then return hPart
+    elseif v:IsA("SpecialMesh") then return hSpecialMesh
+    end
+    return false
+  end
+  local seen = setmetatable({}, { __mode = "k" })
+  local queue, qHead, qTail = {}, 1, 0
+  local scanStack, scanTop = {}, 0
+  local conn
+  local function enqueue(v)
+    if seen[v] then return end
+    local cn = v.ClassName
+    local h = handlerCache[cn]
+    if h == nil then
+      h = resolve(v)
+      handlerCache[cn] = h
+    end
+    if h then
+      seen[v] = true
+      qTail = qTail + 1
+      queue[qTail] = v
+    end
+  end
+  local function frameStep(dt)
+    local budget = (1 / 60) * budgetRatio
+    if dt > (1 / 60) * 1.4 then budget = budget * 0.5 end
+    if budget < 0.001 then budget = 0.001 end
+    if budget > 0.006 then budget = 0.006 end
+    local t0 = os.clock()
+    if not initialDone and t0 < initEnd then
+      budget = initBudget
+    elseif burstBudget > 0 and t0 < burstEnd then
+      budget = burstBudget
+    end
+    local n = 0
+    while true do
+      if qHead <= qTail then
+        local v = queue[qHead]
+        queue[qHead] = nil
+        qHead = qHead + 1
+        if v.Parent then
+          local h = handlerCache[v.ClassName]
+          if h then pcall(h, v) end
+        end
+        doneCount = doneCount + 1
+        wakeCount = wakeCount + 1
+      elseif scanTop > 0 then
+        if qTail ~= 0 then qHead, qTail = 1, 0 end
+        local inst = scanStack[scanTop]
+        scanStack[scanTop] = nil
+        scanTop = scanTop - 1
+        scanCount = scanCount + 1
+        local ok, kids = pcall(inst.GetChildren, inst)
+        if ok then
+          for k = 1, #kids do
+            local c = kids[k]
+            enqueue(c)
+            scanTop = scanTop + 1
+            scanStack[scanTop] = c
+          end
+        end
+      else
+        break
+      end
+      n = n + 1
+      if n % 8 == 0 and os.clock() - t0 >= budget then return end
+    end
+    qHead, qTail = 1, 0
+    if not initialDone then
+      initialDone = true
+      if debugLog then
+        print(string.format("[FPSBoost] Xong lượt đầu: %d instance xử lý, quét %d node, %.2fs (StreamingEnabled=%s)",
+          doneCount, scanCount, os.clock() - initStart, tostring(workspace.StreamingEnabled)))
+      end
+    elseif debugLog and wakeCount >= 200 then
+      print(string.format("[FPSBoost] Đợt mới: %d instance trong %.2fs", wakeCount, os.clock() - wakeStart))
+    end
+    if conn then
+      conn:Disconnect()
+      conn = nil
+    end
+  end
+  local function wake()
+    if not conn then
+      wakeCount = 0
+      wakeStart = os.clock()
+      burstEnd = wakeStart + burstTime
+      conn = RunService.Heartbeat:Connect(frameStep)
+    end
+  end
+  if not getgenv()._FPSBoostHooked then
+    getgenv()._FPSBoostHooked = true
+    workspace.DescendantAdded:Connect(function(v)
+      if v.ClassName == "Attachment" then
+        seen[v] = true
+        pcall(hAttachment, v)
+        return
+      end
+      enqueue(v)
+      if qTail >= qHead then wake() end
+    end)
+    scanTop = 1
+    scanStack[1] = workspace
+    initStart = os.clock()
+    initEnd = initStart + initTime
+    wake()
+  end
+  task.spawn(function()
+    if not getgenv()._FPSBoostGCLoop then
+      getgenv()._FPSBoostGCLoop = true
+      task.spawn(function()
+        while true do
+          task.wait(60)
+          pcall(collectgarbage, "step", 200)
+        end
+      end)
+    end
+  end)
