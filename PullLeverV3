@@ -29,7 +29,6 @@ pcall(function()
 	end
 end)
 
--- [LAYER 2] Dynamic API Hook: Thay thế core.KillSea bằng hàm fix chuẩn
 task.spawn(function()
 	local LP = game:GetService("Players").LocalPlayer
 	local VIM = game:GetService("VirtualInputManager")
@@ -177,7 +176,7 @@ task.spawn(function()
 		return not seaAlive()
 	end
 
-	for _ = 1, 600 do -- đợi tối đa 60s
+	for _ = 1, 600 do
 		local API = getgenv().OrcaHubAPI
 		if API and type(API.core) == "table" then
 			API.core.KillSea = FixedKillSea
