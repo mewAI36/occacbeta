@@ -13,22 +13,6 @@ pcall(function()
 	if env and type(env) == "table" then env.waterY = waterY_current end
 end)
 
-pcall(function()
-	local mt = getrawmetatable and getrawmetatable(getgenv())
-	if mt and not mt.__waterY_patched then
-		local oldIndex = mt.__index
-		if setreadonly then setreadonly(mt, false) end
-		mt.__index = function(t, k)
-			if k == "waterY" then return getWaterY() end
-			if type(oldIndex) == "function" then return oldIndex(t, k) end
-			if type(oldIndex) == "table" then return oldIndex[k] end
-			return nil
-		end
-		mt.__waterY_patched = true
-		if setreadonly then setreadonly(mt, true) end
-	end
-end)
-
 task.spawn(function()
 	local LP = game:GetService("Players").LocalPlayer
 	local VIM = game:GetService("VirtualInputManager")
