@@ -98,10 +98,10 @@ task.spawn(function()
 
 				if retreating then
 					local angle = tick() * 3
-					local dodgeRadius = 50
+					local dodgeRadius = 100
 					local dodgePos = Vector3.new(
 						headPos.X + math.cos(angle) * dodgeRadius,
-						math.max(baseY + 200, waterY + 245),
+						math.max(baseY + 250, waterY + 295),
 						headPos.Z + math.sin(angle) * dodgeRadius
 					)
 					local targetCf = CFrame.lookAt(dodgePos, headPos)
