@@ -160,14 +160,352 @@ task.spawn(function()
 		return not seaAlive()
 	end
 
+	local API = nil
 	for _ = 1, 600 do
-		local API = getgenv().OrcaHubAPI
-		if API and type(API.core) == "table" then
-			API.core.KillSea = FixedKillSea
+		API = getgenv().OrcaHubAPI
+		if API and type(API.core) == "table" and getgenv().OrcaStarted and getgenv().OrcaToken then
 			break
 		end
 		task.wait(0.1)
 	end
+
+	if not (API and type(API.core) == "table" and getgenv().OrcaStarted) then
+		return
+	end
+
+	API.core.KillSea = FixedKillSea
+
+	task.wait(1)
+
+	getgenv().OrcaMainDone = true
+	task.wait(0.5)
+	getgenv().OrcaMainDone = false
+
+	local fixToken = "FIXED_" .. tostring(tick()) .. "_" .. tostring(math.random(1000, 9999))
+	getgenv().OrcaToken = fixToken
+	getgenv().OrcaFixActive = true
+
+	local core = API.core
+	local UI = API.UI
+	local RS = core.RS or game:GetService("ReplicatedStorage")
+	local Config = core.Config or getgenv().Config or {}
+	local upgradeRace = Config["Upgrade Race"] ~= false
+
+	local function setStatus(taskName, st, det)
+		pcall(function()
+			if UI and UI.SetStatus then
+				UI.SetStatus(taskName, st, det)
+			end
+		end)
+	end
+
+	local CommF
+	local function comm(...)
+		if not CommF then
+			local ok, r = pcall(function() return RS.Remotes.CommF_ end)
+			CommF = (ok and r) or nil
+		end
+		if not CommF then task.wait(0.5) return end
+		local args = { ... }
+		local ok, res = pcall(function() return CommF:InvokeServer(table.unpack(args)) end)
+		if not ok then return end
+		return res
+	end
+
+	local function currentRace()
+		local ok, r = pcall(function() return LP.Data.Race.Value end)
+		if ok and typeof(r) == "string" and r ~= "" then return r end
+		return nil
+	end
+
+	local function isLocalAlive()
+		local char = LP.Character
+		local hum = char and char:FindFirstChildOfClass("Humanoid")
+		return hum ~= nil and hum.Health > 0
+	end
+
+	local function seaIdx()
+		local p = game.PlaceId
+		if p == 2753915549 then return 1 end
+		if p == 4442272183 then return 2 end
+		if p == 7449423635 then return 3 end
+		return 0
+	end
+
+	local function goToSea(targetSea, taskName)
+		local cur = seaIdx()
+		if cur == targetSea then return true end
+		if cur == 0 then return false end
+		setStatus(taskName or "Travel", "Teleporting to Sea " .. tostring(targetSea))
+		if targetSea == 1 then
+			comm("TravelMain")
+		elseif targetSea == 2 then
+			comm("TravelDressrosa")
+		elseif targetSea == 3 then
+			comm("TravelZou")
+		end
+		task.wait(3)
+		return false
+	end
+
+	local function storeRemainingFruits()
+		pcall(function()
+			for _, holder in pairs({ LP.Backpack, LP.Character }) do
+				if typeof(holder) == "Instance" then
+					for _, item in pairs(holder:GetChildren()) do
+						if item:IsA("Tool") and (item:FindFirstChild("EatRemote", true) or (item.ToolTip or "") == "Blox Fruit" or tostring(item.Name):find("Fruit")) then
+							local fruitName = item:GetAttribute("FruitName") or item.Name
+							comm("StoreFruit", fruitName, item)
+							task.wait(0.5)
+						end
+					end
+				end
+			end
+		end)
+	end
+
+	local fruitPriceMap = nil
+	local function getFruitPrice(item)
+		if type(item) == "table" then
+			local p = tonumber(item.Price or item.Value)
+			if p and p > 0 then return p end
+			local n = tostring(item.Name or "")
+			if fruitPriceMap and fruitPriceMap[n] then return fruitPriceMap[n] end
+		elseif type(item) == "string" then
+			if fruitPriceMap and fruitPriceMap[item] then return fruitPriceMap[item] end
+			local stripped = item:gsub("%-.*$", ""):gsub(" Fruit$", "")
+			if fruitPriceMap and fruitPriceMap[stripped] then return fruitPriceMap[stripped] end
+		end
+		return 1000000
+	end
+
+	local fruitCheckAt = 0
+	local fruitBuyAt = 0
+	local function cyborgOfferTick()
+		local taskName = "Race V3 | Cyborg"
+		local tool = nil
+		for _, holder in pairs({ LP.Backpack, LP.Character }) do
+			if typeof(holder) == "Instance" then
+				for _, it in pairs(holder:GetChildren()) do
+					if it:FindFirstChild("EatRemote", true) or (it:IsA("Tool") and ((it.ToolTip or "") == "Blox Fruit" or tostring(it.Name):find("Fruit"))) then
+						tool = it
+						break
+					end
+				end
+				if tool then break end
+			end
+		end
+
+		if tool then
+			setStatus(taskName, "Giving Fruit to Wenlocktoad", tool.Name)
+			pcall(function()
+				local hum = LP.Character and LP.Character:FindFirstChildOfClass("Humanoid")
+				if hum and not hum:IsDescendantOf(tool) then hum:EquipTool(tool) end
+			end)
+			task.wait(0.5)
+			pcall(function() comm("Wenlocktoad", "1") end)
+			task.wait(1)
+			return false
+		end
+
+		local spawnedFruit = nil
+		for _, v in pairs(workspace:GetChildren()) do
+			if v:FindFirstChild("EatRemote", true) or (v:IsA("Tool") and ((v.ToolTip or "") == "Blox Fruit" or tostring(v.Name):find("Fruit"))) then
+				spawnedFruit = v
+				break
+			end
+		end
+		if spawnedFruit then
+			setStatus(taskName, "Collecting Spawned Fruit", spawnedFruit.Name)
+			pcall(function()
+				if core and core.TweenTo then
+					core.TweenTo(spawnedFruit:GetPivot() * CFrame.new(0, 2, 0), 250)
+				end
+			end)
+			task.wait(1)
+			return false
+		end
+
+		if tick() - fruitCheckAt >= 5 then
+			fruitCheckAt = tick()
+			local validFruits = {}
+
+			pcall(function()
+				local grid = LP.PlayerGui and LP.PlayerGui:FindFirstChild("Inventory")
+					and LP.PlayerGui.Inventory:FindFirstChild("Inventory")
+					and LP.PlayerGui.Inventory.Inventory:FindFirstChild("Main")
+					and LP.PlayerGui.Inventory.Inventory.Main:FindFirstChild("PageContent")
+					and LP.PlayerGui.Inventory.Inventory.Main.PageContent:FindFirstChild("TileGrid")
+				if grid then
+					for _, tile in ipairs(grid:GetChildren()) do
+						if tile:IsA("ImageButton") then
+							local det = tile:FindFirstChild("Details")
+							local cat = det and det:FindFirstChild("Category")
+							local line1 = det and det:FindFirstChild("Line-1")
+							if cat and cat.Text == "Blox Fruit" and line1 and line1.Text ~= "" then
+								local raw = line1.Text
+								local fname = raw .. "-" .. raw
+								table.insert(validFruits, { Name = fname, Price = getFruitPrice(raw) })
+							end
+						end
+					end
+				end
+			end)
+
+			if #validFruits == 0 then
+				pcall(function()
+					local remoteUtil = require(RS.Controllers.UI.Inventory.RemoteUtil)
+					local ItemId = require(RS.Economy.ItemId)
+					local ok, tiles = remoteUtil.getTiles():await()
+					if ok and type(tiles) == "table" then
+						for _, t in pairs(tiles) do
+							local id = type(t) == "table" and t.ItemId
+							if id then
+								local d = ItemId.getDataFromId(id):unwrapOr(nil)
+								if d and d.Type == "PhysicalMoveset" and d.StorageKey then
+									table.insert(validFruits, { Name = d.StorageKey, Price = getFruitPrice(d.StorageKey) })
+								end
+							end
+						end
+					end
+				end)
+			end
+
+			if #validFruits == 0 then
+				pcall(function()
+					local list = comm("getInventory")
+					if type(list) ~= "table" or #list == 0 then
+						list = comm("getInventoryFruits")
+					end
+					if type(list) == "table" and #list > 0 then
+						for _, item in ipairs(list) do
+							if type(item) == "table" then
+								local itType = tostring(item.Type or "")
+								local itName = tostring(item.Name or "")
+								if itType == "Blox Fruit" or itName:find("Fruit") or itName:find("-") then
+									table.insert(validFruits, { Name = itName, Price = getFruitPrice(item) })
+								end
+							elseif type(item) == "string" and (item:find("Fruit") or item:find("-")) then
+								table.insert(validFruits, { Name = item, Price = getFruitPrice(item) })
+							end
+						end
+					end
+				end)
+			end
+
+			table.sort(validFruits, function(a, b) return a.Price < b.Price end)
+			if #validFruits > 0 then
+				local chosen = validFruits[1]
+				setStatus(taskName, "Unpacking Stored Fruit", chosen.Name .. (chosen.Price > 0 and (" ($" .. tostring(chosen.Price) .. ")") or ""))
+				comm("LoadFruit", chosen.Name)
+				task.wait(1)
+				return false
+			end
+		end
+
+		if tick() - fruitBuyAt >= 15 then
+			fruitBuyAt = tick()
+			pcall(function()
+				local net = RS:FindFirstChild("Modules") and RS.Modules:FindFirstChild("Net")
+				local gacha = net and (net:FindFirstChild("RF/GachaNetworkRF") or net:FindFirstChild("GachaNetworkRF"))
+				if gacha then
+					setStatus(taskName, "Rolling Fruit at Zioles")
+					gacha:InvokeServer({ Context = "Purchase", BoxName = "ZiolesGacha" })
+				else
+					setStatus(taskName, "Rolling Fruit at Cousin")
+					comm("Cousin", "Buy")
+				end
+			end)
+		end
+
+		setStatus(taskName, "Waiting for Blox Fruit", "Need fruit to offer")
+		task.wait(2)
+		return false
+	end
+
+	local function fixedV3Tick(race)
+		local taskName = "Race V3 | " .. race
+		local ws = tonumber(comm("Wenlocktoad", "1")) or 0
+		if ws == -1 or ws == 0 then
+			if not goToSea(2, taskName) then return false end
+			setStatus(taskName, "Accepting the Quest")
+			comm("Wenlocktoad", "2")
+			task.wait(2)
+			return false
+		end
+		if ws == 1 then
+			if not goToSea(2, taskName) then return false end
+			if race == "Cyborg" then
+				return cyborgOfferTick()
+			end
+			return false
+		end
+		if ws == 2 then
+			if not goToSea(2, taskName) then return false end
+			setStatus(taskName, "Buying Race V3")
+			comm("Wenlocktoad", "3")
+			task.wait(1)
+			return false
+		end
+		if ws == -2 then
+			storeRemainingFruits()
+			setStatus(taskName, "Done")
+			return true
+		end
+		setStatus(taskName, "Waiting for Wenlocktoad", "state " .. tostring(ws))
+		task.wait(1)
+		return false
+	end
+
+	local oldRunLane = API.RACE and API.RACE.Run
+
+	local function fixedRunMainLane()
+		local cur = currentRace()
+		local isV3 = core and core.checkV3 and core.checkV3(cur)
+		if upgradeRace ~= false and not isV3 and cur == "Cyborg" then
+			local lv = tonumber(comm("getRaceLevel"))
+			if lv == 2 or lv == nil or lv <= 0 then
+				if not isLocalAlive() then
+					setStatus("Race V3 | Cyborg", "Waiting for Respawn...")
+					task.wait(1)
+					return
+				end
+				local done = fixedV3Tick("Cyborg")
+				if done then
+					task.wait(2)
+				end
+				return
+			end
+		end
+		if oldRunLane then
+			return oldRunLane()
+		end
+	end
+
+	API.RACE = { Run = fixedRunMainLane }
+
+	local function fixedMainLoop()
+		local lastWarn = 0
+		while true do
+			if getgenv().OrcaFixActive ~= true then break end
+			if getgenv().OrcaToken ~= fixToken then
+				getgenv().OrcaToken = fixToken
+			end
+			local t0 = tick()
+			local ok, res = pcall(fixedRunMainLane)
+			if not ok and tick() - lastWarn >= 5 then
+				lastWarn = tick()
+				warn("[OrcaHub|RACE] tick loi: " .. tostring(res))
+				setStatus("OrcaHub", "Tick Error", tostring(res):sub(1, 80))
+			end
+			if res == "STOP" then break end
+			task.wait(math.max(0.1, 0.3 - (tick() - t0)))
+		end
+	end
+
+	pcall(function() UI.SetHUD("OrcaHub") end)
+	setStatus("Idle", "Starting", "Race " .. tostring(currentRace() or "?"))
+	task.spawn(fixedMainLoop)
 end)
 
 -- This file was protected using Luraph Obfuscator v15.1 [https://lura.ph/]
