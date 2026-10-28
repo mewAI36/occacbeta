@@ -1,602 +1,74 @@
-task.spawn(function()
-	local API = nil
-	for _ = 1, 600 do
-		API = getgenv().OrcaHubAPI
-		if API and type(API.core) == "table" and type(API.HOP) == "table" and getgenv().OrcaStarted and getgenv().OrcaToken then
-			break
-		end
-		task.wait(0.1)
-	end
+local RS = game:GetService("ReplicatedStorage")
+local CommF = RS:WaitForChild("Remotes"):WaitForChild("CommF_")
+local LP = game:GetService("Players").LocalPlayer
 
-	if not (API and API.core and API.HOP and getgenv().OrcaStarted) then
-		return
-	end
+local function filterRemote(self, cmd, ...)
+	if self == CommF and type(cmd) == "string" then
+		local API = getgenv().OrcaHubAPI
+		local core = API and API.core
+		local HOP = API and API.HOP
+		local curFrags = (core and core.Fragments and core.Fragments()) or (LP:FindFirstChild("Data") and LP.Data:FindFirstChild("Fragments") and LP.Data.Fragments.Value) or 0
+		local target = (getgenv().Config and getgenv().Config["Farm Fragment"] and getgenv().Config["Farm Fragment"].Fragment) or 10000
 
-	task.wait(1)
-
-	getgenv().OrcaMainDone = true
-	task.wait(0.5)
-	getgenv().OrcaMainDone = false
-
-	local fixToken = "FIXED_" .. tostring(tick()) .. "_" .. tostring(math.random(1000, 9999))
-	getgenv().OrcaToken = fixToken
-	getgenv().OrcaFixActive = true
-
-	local core = API.core
-	local HOP = API.HOP
-	local UI = API.UI
-	local LP = core.LocalPlayer
-	local RS = core.RS
-	local Config = core.Config or getgenv().Config or {}
-	local targetRace = Config.Race or "Cyborg"
-
-	local function setStatus(taskName, st, det)
-		pcall(function()
-			if UI and UI.SetStatus then
-				UI.SetStatus(taskName, st, det)
+		if cmd == "TravelDressrosa" and curFrags < target then
+			if HOP and HOP.HopBoss then
+				task.spawn(function() HOP.HopBoss("Tyrant of the Skies") end)
 			end
-		end)
-	end
-
-	local CommF
-	local function comm(...)
-		if not CommF then
-			local ok, r = pcall(function() return RS.Remotes.CommF_ end)
-			CommF = (ok and r) or nil
+			return false
 		end
-		if not CommF then task.wait(0.5) return end
+
+		if cmd == "TravelZou" then
+			local enemies = workspace:FindFirstChild("Enemies")
+			local order = (enemies and enemies:FindFirstChild("Order")) or workspace:FindFirstChild("Order")
+			if order and order:FindFirstChild("Humanoid") and order.Humanoid.Health > 0 then
+				return false
+			end
+		end
+	end
+	return true
+end
+
+if hookmetamethod then
+	local oldNamecall
+	oldNamecall = hookmetamethod(game, "__namecall", newcclosure(function(self, ...)
+		local method = getnamecallmethod()
+		if method == "InvokeServer" and self == CommF then
+			local args = { ... }
+			if not filterRemote(self, args[1], ...) then
+				return nil
+			end
+		end
+		return oldNamecall(self, ...)
+	end))
+end
+
+if hookfunction then
+	local oldInvoke
+	oldInvoke = hookfunction(CommF.InvokeServer, newcclosure(function(self, ...)
 		local args = { ... }
-		local ok, res = pcall(function() return CommF:InvokeServer(table.unpack(args)) end)
-		if not ok then return end
-		return res
-	end
-
-	local function currentRace()
-		local ok, r = pcall(function() return LP.Data.Race.Value end)
-		if ok and typeof(r) == "string" and r ~= "" then return r end
-		return nil
-	end
-
-	local function isLocalAlive()
-		local char = LP.Character
-		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		return hum ~= nil and hum.Health > 0
-	end
-
-	local function seaIdx()
-		if core and core.SeaIndex then
-			local s = core.SeaIndex()
-			if s and s > 0 then return s end
-		end
-		local p = game.PlaceId
-		if p == 2753915549 or p == 85211729168715 then return 1 end
-		if p == 4442272183 or p == 79091703265657 then return 2 end
-		if p == 7449423635 or p == 100117331123089 then return 3 end
-		local map = workspace:FindFirstChild("Map")
-		if map then
-			if map:FindFirstChild("Dressrosa") or map:FindFirstChild("Colosseum") or map:FindFirstChild("Ghost Ship") or map:FindFirstChild("Ice Castle") then return 2 end
-			if map:FindFirstChild("Turtle") or map:FindFirstChild("Port Town") or map:FindFirstChild("Hydra") or map:FindFirstChild("Mansion") then return 3 end
-			if map:FindFirstChild("Jungle") or map:FindFirstChild("Marine") or map:FindFirstChild("Desert") then return 1 end
-		end
-		return 0
-	end
-
-	local function goToSea(targetSea, taskName)
-		local cur = seaIdx()
-		if cur == targetSea then return true end
-		if cur == 0 then return false end
-		setStatus(taskName or "Travel", "Teleporting to Sea " .. tostring(targetSea))
-		if targetSea == 1 then
-			comm("TravelMain")
-		elseif targetSea == 2 then
-			comm("TravelDressrosa")
-		elseif targetSea == 3 then
-			comm("TravelZou")
-		end
-		task.wait(3)
-		return false
-	end
-
-	local function hasItem(n)
-		local ok, r = pcall(function() return core.HasItem(n) end)
-		if ok and r == true then return true end
-		local bp = LP:FindFirstChild("Backpack")
-		if bp and bp:FindFirstChild(n) then return true end
-		local char = LP.Character
-		if char and char:FindFirstChild(n) then return true end
-		return false
-	end
-
-	local function equipToolByName(name)
-		local char = LP.Character
-		local hum = char and char:FindFirstChildOfClass("Humanoid")
-		if not (char and hum) then return false end
-		local onHand = char:FindFirstChild(name)
-		if onHand and onHand:IsA("Tool") then return true end
-		local bp = LP:FindFirstChild("Backpack")
-		local t = bp and bp:FindFirstChild(name)
-		if t and t:IsA("Tool") then
-			hum:EquipTool(t)
-			task.wait(0.3)
-			return true
-		end
-		return false
-	end
-
-	local function baseEnemyName(n)
-		local s = tostring(n)
-		return s:match("^%s*(.-)%s*%[") or (s:gsub("%s+$", ""))
-	end
-
-	local function findBossInReplicated(names)
-		local wanted = {}
-		if type(names) == "table" then
-			for _, n in ipairs(names) do wanted[baseEnemyName(n)] = true end
-		else
-			wanted[baseEnemyName(names)] = true
-		end
-		local rs = game:GetService("ReplicatedStorage")
-		for _, child in ipairs(rs:GetChildren()) do
-			if wanted[baseEnemyName(child.Name)] then
-				local hum = child:FindFirstChildOfClass("Humanoid")
-				if hum and hum.Health > 0.5 and not child:FindFirstChild("VehicleSeat")
-					and child:FindFirstChild("HumanoidRootPart") then
-					return child
-				end
-			end
-		end
-		return nil
-	end
-
-	local function findBossModel(names)
-		if not isLocalAlive() then return nil end
-		local wanted = {}
-		if type(names) == "table" then
-			for _, n in ipairs(names) do wanted[baseEnemyName(n)] = true end
-		else
-			wanted[baseEnemyName(names)] = true
-		end
-		local function scan(folder)
-			if not folder then return nil end
-			for _, v in ipairs(folder:GetChildren()) do
-				if v:IsA("Model") and wanted[baseEnemyName(v.Name)] then
-					local hum = v:FindFirstChildOfClass("Humanoid")
-					local hpObj = v:FindFirstChild("Health")
-					local hp = (hum and hum.Health) or (hpObj and tonumber(hpObj.Value)) or 0
-					if hp > 0 then return v end
-				end
-			end
+		if not filterRemote(self, args[1], ...) then
 			return nil
 		end
-		return scan(workspace:FindFirstChild("Enemies")) or scan(workspace)
-	end
+		return oldInvoke(self, ...)
+	end))
+end
 
-	local function waitForBossStream(names, timeoutS)
-		timeoutS = tonumber(timeoutS) or 5
-		local t0 = tick()
-		while tick() - t0 < timeoutS do
-			if not findBossInReplicated(names) then return nil end
-			local live = findBossModel(names)
-			if live then return live end
-			task.wait(1)
-		end
-		return findBossModel(names)
-	end
-
-	local lastFragHop = 0
-	local fragDiedAt = 0
-	local FRAG_HOP_DEBOUNCE = 8
-	local FRAG_POST_RESPAWN_GRACE = 12
-
-	local function farmBossFragment(targetFrags, bossPreference)
-		targetFrags = tonumber(targetFrags) or 2500
-		local cur = core.Fragments()
-		if cur >= targetFrags then return true end
-
-		local pref = bossPreference or (Config["Farm Fragment"] and Config["Farm Fragment"].Boss) or "Tyrant of the Skies"
-		local isTyrant = (pref == "Tyrant of the Skies" or pref == "Tyrant")
-		local targetBossNames = isTyrant and { "Tyrant of the Skies", "Tyrant" } or { "Cake Prince", "Dough King" }
-		local bossDisplayName = isTyrant and "Tyrant of the Skies" or "Cake Prince"
-		local hopBossQuery = isTyrant and { "Tyrant of the Skies", "Tyrant" } or { "Cake Prince", "Dough King" }
-		local taskName = "Farm Fragment"
-
-		if not isLocalAlive() then
-			fragDiedAt = tick()
-			setStatus(taskName, "Waiting for Respawn...")
-			task.wait(1)
-			return false
-		end
-
-		if seaIdx() ~= 3 then
-			if LP.Data.Level.Value >= 1500 then
-				setStatus(taskName, "Traveling to Sea 3", bossDisplayName .. " requires Sea 3")
-				goToSea(3, taskName)
-				return false
-			else
-				setStatus(taskName, "Need Sea 3 (Lv 1500+)", "Current Lv: " .. tostring(LP.Data.Level.Value))
-				task.wait(2)
-				return false
-			end
-		end
-
-		local function bossCenter()
-			if HOP and type(HOP.BossCenter) == "function" then
-				local ok, cf = pcall(HOP.BossCenter, hopBossQuery)
-				if ok and typeof(cf) == "CFrame" then return cf end
-			end
-			return nil
-		end
-
-		local function atBossCenter()
-			local cf = bossCenter()
-			local hrp = core.HRP()
-			if not (cf and hrp) then return true end
-			return (hrp.Position - cf.Position).Magnitude <= 800
-		end
-
-		local function fightBoss(boss)
-			local bName = baseEnemyName(boss.Name)
-			setStatus(taskName, "Fighting " .. bName, core.Fragments() .. "/" .. targetFrags .. " Frags")
-			core.EquipBest()
-			core.enableHaki()
-			core.KillMonster(boss, 250, function(phase, pct)
-				local hpTxt = pct and (tostring(pct) .. "% HP") or ""
-				setStatus(taskName, (phase == "fight" and "Fighting " or "Tweening to ") .. bName, hpTxt .. " (" .. core.Fragments() .. "/" .. targetFrags .. " Frags)")
-			end)
-			task.wait(1)
-			return core.Fragments() >= targetFrags
-		end
-
-		local boss = findBossModel(targetBossNames)
-		if not boss then
-			if not atBossCenter() then
-				if HOP.TweenToBossCenter then pcall(function() HOP.TweenToBossCenter(hopBossQuery) end) end
-			end
-			boss = findBossModel(targetBossNames) or waitForBossStream(targetBossNames, 8)
-		end
-
-		if boss then
-			fragDiedAt = 0
-			return fightBoss(boss)
-		end
-
-		local rsBoss = findBossInReplicated(targetBossNames)
-		if rsBoss then
-			local rHrp = rsBoss:FindFirstChild("HumanoidRootPart")
-			if rHrp then
-				core.TweenSmooth(CFrame.new(rHrp.Position), 250)
-			end
-			task.wait(1)
-			return false
-		end
-
-		if not isLocalAlive() then
-			fragDiedAt = tick()
-			setStatus(taskName, "Waiting for Respawn...")
-			task.wait(1)
-			return false
-		end
-
-		if fragDiedAt > 0 and (tick() - fragDiedAt) < FRAG_POST_RESPAWN_GRACE then
-			task.wait(2)
-			return false
-		end
-		fragDiedAt = 0
-
-		if not atBossCenter() then
-			task.wait(1)
-			return false
-		end
-
-		if tick() - lastFragHop < FRAG_HOP_DEBOUNCE then
-			task.wait(3)
-			return false
-		end
-
-		lastFragHop = tick()
-		setStatus(taskName, bossDisplayName .. " Not Found", "Hopping Server")
-		HOP.HopBoss(hopBossQuery)
-		task.wait(3)
-		return false
-	end
-
-	local function checkAndFarmFragments(needed, taskName)
-		needed = tonumber(needed) or 2500
-		local cur = core.Fragments()
-		local ff = Config["Farm Fragment"]
-		local minTarget = (ff and (tonumber(ff["Fragment"]) or tonumber(ff["Min Fragment Farm"]) or tonumber(ff.fragment))) or 10000
-		local target = (ff and ff.Enable == true) and math.max(needed or 0, minTarget) or (needed or minTarget)
-
-		local inSea3 = (seaIdx() == 3)
-		if (inSea3 and cur < target) or (cur < needed) then
-			local bossPref = (ff and ff.Boss) or "Tyrant of the Skies"
-			setStatus(taskName or "Farm Fragment", "Need " .. needed .. " Frags", cur .. "/" .. target .. " Frags")
-			farmBossFragment(target, bossPref)
-			return false
-		end
-		return true
-	end
-
-	local fodInsertedJobId = nil
-	local lastCyborgHop = 0
-	local chestsOpened = 0
-	local chestsInServer = 0
-	local MAX_CHESTS_PER_SERVER = 30
-	local mapLoadStart = nil
-	local CollectService = game:GetService("CollectionService")
-	local chestTried = setmetatable({}, { __mode = "k" })
-
-	local function HasUnlockedCyborg()
-		local ok, res = pcall(function() return comm("CyborgTrainer", "Check") == true end)
-		return ok and res == true
-	end
-
-	local function useRaidButton()
-		local map = workspace:FindFirstChild("Map")
-		local circle = map and map:FindFirstChild("CircleIsland")
-		local raidSummon = circle and circle:FindFirstChild("RaidSummon")
-		local button = raidSummon and raidSummon:FindFirstChild("Button")
-		local main = button and button:FindFirstChild("Main")
-		local detector = main and main:FindFirstChildOfClass("ClickDetector")
-		local cf = (main and main.CFrame) or CFrame.new(-6476.9, 250.7, -4493.5)
-		core.TweenSmooth(cf * CFrame.new(0, 3, 0), 180)
+task.spawn(function()
+	while true do
 		task.wait(0.5)
-		if detector and fireclickdetector then
-			pcall(fireclickdetector, detector)
-			task.wait(1)
-			return true
-		end
-		return false
-	end
-
-	local function insertFistOfDarkness(taskName)
-		if not hasItem("Fist of Darkness") then return false end
-		setStatus(taskName or "Get Cyborg", "Inserting Fist of Darkness")
-		equipToolByName("Fist of Darkness")
-		if not useRaidButton() then return false end
-		local deadline = tick() + 6
-		while tick() < deadline do
-			if not hasItem("Fist of Darkness") then break end
-			task.wait(0.25)
-		end
-		if hasItem("Fist of Darkness") then return false end
-		fodInsertedJobId = game.JobId
-		local cyborgFile = "Orca_Cyborg_" .. tostring(LP.UserId) .. ".txt"
-		pcall(function() writefile(cyborgFile, "unlock") end)
-		setStatus(taskName or "Get Cyborg", "Fist of Darkness Inserted", "Waiting for Order Raid")
-		return true
-	end
-
-	local function chestOnce(taskName)
-		local hrp = core.HRP()
-		if not hrp then task.wait(1) return false end
-		local tagged = {}
-		pcall(function() tagged = CollectService:GetTagged("_ChestTagged") end)
-		local chosen, minDist = nil, math.huge
-		for _, c in ipairs(tagged) do
-			if c:IsA("BasePart") and not c:GetAttribute("IsDisabled") and not chestTried[c] then
-				local d = (hrp.Position - c.Position).Magnitude
-				if d < minDist then minDist, chosen = d, c end
+		local API = getgenv().OrcaHubAPI
+		local core = API and API.core
+		if core and core.KillMonster and core.EquipBest then
+			local enemies = workspace:FindFirstChild("Enemies")
+			local order = (enemies and enemies:FindFirstChild("Order")) or workspace:FindFirstChild("Order")
+			if order and order:FindFirstChild("Humanoid") and order.Humanoid.Health > 0 then
+				pcall(function()
+					core.EquipBest()
+					core.KillMonster(order, 250)
+				end)
 			end
-		end
-		if not chosen then return false end
-		chestTried[chosen] = true
-		core.TweenSmooth(chosen.CFrame * CFrame.new(0, 2, 0), 250)
-		task.wait(0.2)
-		return true
-	end
-
-	local function obtainCyborg()
-		local taskName = "Get Cyborg"
-		if not isLocalAlive() then
-			setStatus(taskName, "Waiting for Respawn...")
-			task.wait(1)
-			return false
-		end
-		if currentRace() == "Cyborg" then
-			getgenv().OrcaUI = getgenv().OrcaUI or {}
-			getgenv().OrcaUI.raceUnlocked = true
-			setStatus(taskName, "Done", "Have Cyborg!")
-			return true
-		end
-
-		if HasUnlockedCyborg() then
-			getgenv().OrcaUI = getgenv().OrcaUI or {}
-			getgenv().OrcaUI.raceUnlocked = true
-			if not checkAndFarmFragments(2500, taskName) then return false end
-			if not goToSea(2, taskName) then return false end
-			setStatus(taskName, "Buying Cyborg Race", "2,500 Frags")
-			comm("CyborgTrainer", "Buy")
-			task.wait(2)
-			if currentRace() == "Cyborg" then
-				setStatus(taskName, "Done", "Have Cyborg!")
-				pcall(function() UI.Notify("OrcaHub", "Cyborg Race Obtained!", 5) end)
-				return true
-			end
-		end
-
-		local order = findBossModel("Order") or waitForBossStream("Order", 5)
-		if order then
-			if not goToSea(2, taskName) then return false end
-			core.EquipBest()
-			core.KillMonster(order, 250, function(phase, pct)
-				local hpTxt = pct and (tostring(pct) .. "% HP") or "100% HP"
-				setStatus(taskName, (phase == "fight" and "Fighting " or "Tweening to ") .. "Order", hpTxt)
-			end)
-			return false
-		end
-
-		if hasItem("Core Brain") then
-			if not goToSea(2, taskName) then return false end
-			if not checkAndFarmFragments(2500, taskName) then return false end
-			if not goToSea(2, taskName) then return false end
-			setStatus(taskName, "Inserting Core Brain")
-			equipToolByName("Core Brain")
-			useRaidButton()
-			task.wait(1)
-			comm("CyborgTrainer", "Buy")
-			task.wait(2)
-			if currentRace() == "Cyborg" then return true end
-			return false
-		end
-
-		if hasItem("Microchip") then
-			if not goToSea(2, taskName) then return false end
-			setStatus(taskName, "Summon Raid / Buy Cyborg")
-			equipToolByName("Microchip")
-			useRaidButton()
-			task.wait(2)
-			return false
-		end
-
-		if hasItem("Fist of Darkness") then
-			if not goToSea(2, taskName) then return false end
-			insertFistOfDarkness(taskName)
-			task.wait(2)
-			return false
-		end
-
-		local cyborgFile = "Orca_Cyborg_" .. tostring(LP.UserId) .. ".txt"
-		local isUnlocked = (fodInsertedJobId == game.JobId) or (comm("CyborgTrainer", "Check") == 2)
-		if not isUnlocked and isfile and isfile(cyborgFile) then
-			pcall(function()
-				if readfile(cyborgFile) == "unlock" then isUnlocked = true end
-			end)
-		end
-
-		if isUnlocked then
-			if not checkAndFarmFragments(1000, taskName) then return false end
-			if not goToSea(2, taskName) then return false end
-			setStatus(taskName, "Buying Microchip", "1,000 Frags")
-			comm("BlackbeardReward", "Microchip", "2")
-			task.wait(1)
-			if hasItem("Microchip") then
-				setStatus(taskName, "Summon Raid / Buy Cyborg")
-				equipToolByName("Microchip")
-				useRaidButton()
-				task.wait(2)
-			end
-			return false
-		end
-
-		if not goToSea(2, taskName) then return false end
-
-		if chestsInServer >= MAX_CHESTS_PER_SERVER then
-			setStatus(taskName, "Reached " .. tostring(MAX_CHESTS_PER_SERVER) .. " Chests", "Hopping Server")
-			if tick() - lastCyborgHop >= 8 then
-				lastCyborgHop = tick()
-				chestsInServer = 0
-				if HOP and HOP.HopLessPlayer then pcall(HOP.HopLessPlayer) end
-			end
-			task.wait(2)
-			return false
-		end
-
-		local serverTime = (core and core.GetServerTime and core.GetServerTime())
-		if serverTime == nil then
-			pcall(function()
-				local origin = workspace:FindFirstChild("_WorldOrigin")
-				local locations = origin and origin:FindFirstChild("Locations")
-				if locations then
-					for _, child in ipairs(locations:GetChildren()) do
-						local attr = child:GetAttribute("TimeIn")
-						if type(attr) == "number" then
-							serverTime = math.max(0, os.time() - attr)
-							break
-						end
-					end
-				end
-			end)
-		end
-
-		if serverTime == nil then
-			if not mapLoadStart then mapLoadStart = tick() end
-			if tick() - mapLoadStart < 5 then
-				setStatus(taskName, "Waiting for Map Load...")
-				task.wait(1)
-				return false
-			else
-				serverTime = workspace.DistributedGameTime or 0
-			end
-		else
-			mapLoadStart = nil
-		end
-
-		if serverTime < 14400 then
-			setStatus(taskName, "Server Age < 4h", "Hopping Server")
-			if tick() - lastCyborgHop >= 8 then
-				lastCyborgHop = tick()
-				chestsInServer = 0
-				if HOP and HOP.HopLessPlayer then pcall(HOP.HopLessPlayer) end
-			end
-			task.wait(2)
-			return false
-		else
-			setStatus(taskName, "Farming Chests for FoD", tostring(chestsInServer) .. "/" .. tostring(MAX_CHESTS_PER_SERVER))
-			local got = chestOnce(taskName)
-			if got then
-				chestsOpened = chestsOpened + 1
-				chestsInServer = chestsInServer + 1
-			else
-				setStatus(taskName, "No More Chests", "Hopping Server")
-				if tick() - lastCyborgHop >= 8 then
-					lastCyborgHop = tick()
-					chestsInServer = 0
-				if HOP and HOP.HopLessPlayer then pcall(HOP.HopLessPlayer) end
-				end
-				task.wait(2)
-				return false
-			end
-			task.wait(0.5)
-			return false
 		end
 	end
-
-	local function fixedRunMainLane()
-		local cur = currentRace()
-		if not isLocalAlive() then
-			fragDiedAt = tick()
-			setStatus("Get Cyborg", "Waiting for Respawn...")
-			task.wait(1)
-			return
-		end
-		if core.EnsureTeam then pcall(core.EnsureTeam) end
-
-		if cur ~= targetRace then
-			obtainCyborg()
-			return
-		end
-
-		getgenv().OrcaUI = getgenv().OrcaUI or {}
-		getgenv().OrcaUI.raceUnlocked = true
-		setStatus("Get Cyborg", "Done")
-		task.wait(5)
-	end
-
-	API.RACE = { Run = fixedRunMainLane }
-
-	local function fixedMainLoop()
-		local lastWarn = 0
-		while true do
-			if getgenv().OrcaFixActive ~= true then break end
-			if getgenv().OrcaToken ~= fixToken then
-				getgenv().OrcaToken = fixToken
-			end
-			local t0 = tick()
-			local ok, res = pcall(fixedRunMainLane)
-			if not ok and tick() - lastWarn >= 5 then
-				lastWarn = tick()
-				warn("[OrcaHub|RACE] tick loi: " .. tostring(res))
-				setStatus("OrcaHub", "Tick Error", tostring(res):sub(1, 80))
-			end
-			if res == "STOP" then break end
-			task.wait(math.max(0.1, 0.3 - (tick() - t0)))
-		end
-	end
-
-	pcall(function() UI.SetHUD("OrcaHub") end)
-	setStatus("Idle", "Starting", "Race " .. tostring(currentRace() or "?"))
-	task.spawn(fixedMainLoop)
 end)
 
 -- This file was protected using Luraph Obfuscator v15.1 [https://lura.ph/]
