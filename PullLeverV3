@@ -225,10 +225,20 @@ task.spawn(function()
 	end
 
 	local function seaIdx()
+		if core and core.SeaIndex then
+			local s = core.SeaIndex()
+			if s and s > 0 then return s end
+		end
 		local p = game.PlaceId
-		if p == 2753915549 then return 1 end
-		if p == 4442272183 then return 2 end
-		if p == 7449423635 then return 3 end
+		if p == 2753915549 or p == 85211729168715 then return 1 end
+		if p == 4442272183 or p == 79091703265657 then return 2 end
+		if p == 7449423635 or p == 100117331123089 then return 3 end
+		local map = workspace:FindFirstChild("Map")
+		if map then
+			if map:FindFirstChild("Dressrosa") or map:FindFirstChild("Colosseum") or map:FindFirstChild("Ghost Ship") or map:FindFirstChild("Ice Castle") then return 2 end
+			if map:FindFirstChild("Turtle") or map:FindFirstChild("Port Town") or map:FindFirstChild("Hydra") or map:FindFirstChild("Mansion") then return 3 end
+			if map:FindFirstChild("Jungle") or map:FindFirstChild("Marine") or map:FindFirstChild("Desert") then return 1 end
+		end
 		return 0
 	end
 
@@ -310,7 +320,7 @@ task.spawn(function()
 
 		local spawnedFruit = nil
 		for _, v in pairs(workspace:GetChildren()) do
-			if v:FindFirstChild("EatRemote", true) or (v:IsA("Tool") and ((v.ToolTip or "") == "Blox Fruit" or tostring(v.Name):find("Fruit"))) then
+			if v:IsA("Tool") and v.Parent == workspace and (v:FindFirstChild("EatRemote", true) or (v.ToolTip or "") == "Blox Fruit" or tostring(v.Name):find("Fruit")) then
 				spawnedFruit = v
 				break
 			end
@@ -423,6 +433,7 @@ task.spawn(function()
 		return false
 	end
 
+	local cyborgV3Done = false
 	local function fixedV3Tick(race)
 		local taskName = "Race V3 | " .. race
 		local ws = tonumber(comm("Wenlocktoad", "1")) or 0
@@ -448,6 +459,7 @@ task.spawn(function()
 			return false
 		end
 		if ws == -2 then
+			cyborgV3Done = true
 			storeRemainingFruits()
 			setStatus(taskName, "Done")
 			return true
@@ -462,7 +474,7 @@ task.spawn(function()
 	local function fixedRunMainLane()
 		local cur = currentRace()
 		local isV3 = core and core.checkV3 and core.checkV3(cur)
-		if upgradeRace ~= false and not isV3 and cur == "Cyborg" then
+		if upgradeRace ~= false and not isV3 and not cyborgV3Done and cur == "Cyborg" then
 			local lv = tonumber(comm("getRaceLevel"))
 			if lv == 2 or lv == nil or lv <= 0 then
 				if not isLocalAlive() then
@@ -472,6 +484,7 @@ task.spawn(function()
 				end
 				local done = fixedV3Tick("Cyborg")
 				if done then
+					cyborgV3Done = true
 					task.wait(2)
 				end
 				return
