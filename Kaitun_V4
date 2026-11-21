@@ -1,2 +1,3 @@
 getgenv().Script = "Kaitun V4"
+getgenv().Key = nil
 loadstring(game:HttpGet("https://script.orca-hub.xyz/lua/loader.luau"))()
